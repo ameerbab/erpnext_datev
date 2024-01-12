@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.core.doctype.communication.email import make as make_communication
-
+from frappe.translate import print_language
 
 class DATEVUnternehmenOnlineSettings(Document):
 	def validate(self):
@@ -30,11 +30,13 @@ def send(doc, method):
 	attachments = []
 
 	if voucher_config.attach_print:
-		attachments.append(
-			get_print_config(
-				doc.doctype, doc.name, voucher_config.print_format, doc.language
-			)
+		filename = attach_print(
+			doc.doctype,
+			doc.name,
+			doc.language,
+			voucher_config.print_format,
 		)
+		attachments.append(filename)
 
 	if voucher_config.attach_files:
 		attachments.extend(get_attached_files(doc.doctype, doc.name))
@@ -60,8 +62,22 @@ def send(doc, method):
 		send_email=True,
 		attachments=attachments,
 		communication_type="Automated Message",
-		ignore_permissions=True,
 	)
+
+
+def attach_print(doctype, name, language, print_format):
+	with print_language(language):
+		data = frappe.get_print(doctype, name, print_format, as_pdf=True)
+
+	file = frappe.new_doc("File")
+	file.file_name = f"{name}.pdf"
+	file.content = data
+	file.attached_to_doctype = doctype
+	file.attached_to_name = name
+	file.is_private = 1
+	file.save()
+
+	return file.name
 
 
 def get_voucher_config(settings: DATEVUnternehmenOnlineSettings, doctype: str):
@@ -81,23 +97,5 @@ def get_attached_files(doctype: str, docname: str):
 			"attached_to_doctype": doctype,
 			"attached_to_name": docname,
 		},
-		fields=["name as fid"],
+		pluck="name",
 	)
-
-
-def get_print_config(
-	doctype: str, docname: str, print_format: str, language: str = None
-):
-	_language = (
-		language
-		or frappe.db.get_value("Print Format", print_format, "default_print_language")
-		or frappe.db.get_single_value("System Settings", "language")
-	)
-
-	return {
-		"print_format_attachment": 1,
-		"doctype": doctype,
-		"name": docname,
-		"print_format": print_format,
-		"lang": _language,
-	}
